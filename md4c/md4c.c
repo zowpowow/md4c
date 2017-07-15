@@ -946,6 +946,8 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
     int attr_state;
     OFF off = beg;
     OFF line_end = (n_lines > 0) ? lines[0].end : ctx->size;
+    OFF tagname_beg;
+    OFF tagname_end;
     int i = 0;
 
     MD_ASSERT(CH(beg) == _T('<'));
@@ -973,11 +975,21 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
     }
 
     /* Tag name */
+    tagname_beg = off;
     if(off >= line_end  ||  !ISALPHA(off))
         return FALSE;
     off++;
     while(off < line_end  &&  (ISALNUM(off)  ||  CH(off) == _T('-')))
         off++;
+    tagname_end = off;
+
+    /* Verify app. allows this tag. */
+    if(ctx->r.filter_raw_html_tag != NULL) {
+        if(ctx->r.filter_raw_html_tag(STR(tagname_beg), tagname_end - tagname_beg, ctx->userdata) != 0) {
+            MD_LOG("Tag disabled from filter_raw_html_tag() callback.");
+            return FALSE;
+        }
+    }
 
     /* (Optional) attributes (if not closer), (optional) '/' (if not closer)
      * and final '>'. */
@@ -3360,6 +3372,23 @@ md_resolve_links(MD_CTX* ctx, const MD_LINE* lines, int n_lines)
                 is_link = md_is_link_reference(ctx, lines, n_lines, opener->beg, closer->end, &attr);
                 if(is_link < 0)
                     return -1;
+            }
+        }
+
+        if(ctx->r.filter_url_scheme != NULL  &&  is_link) {
+            /* Verify that the link scheme (if present) is allowed.
+             * (See https://tools.ietf.org/html/rfc3986#section-3.1) */
+            OFF off = attr.dest_beg;
+
+            if(off < attr.dest_end  &&  ISALPHA(off))
+                off++;
+            while(off < attr.dest_end  &&  (ISALNUM(off) || ISANYOF(off, _T("+.-"))))
+                off++;
+            if(off < attr.dest_end  &&  CH(off) == _T(':')) {
+                if(ctx->r.filter_url_scheme(STR(attr.dest_beg), off - attr.dest_beg, ctx->userdata) != 0) {
+                    MD_LOG("Link disabled from filter_url_scheme() callback.");
+                    is_link = FALSE;
+                }
             }
         }
 

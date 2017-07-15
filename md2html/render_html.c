@@ -28,6 +28,7 @@
 
 #include "render_html.h"
 #include "entity.h"
+#include "safemode.h"
 
 
 #ifdef _MSC_VER
@@ -474,16 +475,20 @@ md_render_html(const MD_CHAR* input, MD_SIZE input_size,
                void* userdata, unsigned parser_flags, unsigned renderer_flags)
 {
     MD_RENDER_HTML render = { process_output, userdata, renderer_flags };
+    MD_RENDERER renderer = { 0 };
 
-    MD_RENDERER renderer = {
-        enter_block_callback,
-        leave_block_callback,
-        enter_span_callback,
-        leave_span_callback,
-        text_callback,
-        debug_log_callback,
-        parser_flags
-    };
+    renderer.enter_block = enter_block_callback;
+    renderer.leave_block = leave_block_callback;
+    renderer.enter_span = enter_span_callback;
+    renderer.leave_span = leave_span_callback;
+    renderer.text = text_callback;
+    renderer.debug_log = debug_log_callback;
+    renderer.flags = parser_flags;
+
+    if(renderer_flags & MD_RENDER_FLAG_SAFEMODE) {
+        renderer.filter_raw_html_tag = filter_tag;
+        renderer.filter_url_scheme = filter_scheme;
+    }
 
     return md_parse(input, input_size, &renderer, (void*) &render);
 }
