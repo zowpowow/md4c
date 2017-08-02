@@ -81,7 +81,7 @@ static const struct str_list scheme_whitelist[] = {
 static const int scheme_whitelist_n = (sizeof(scheme_whitelist) / sizeof(scheme_whitelist[0]));
 
 
-static inline int
+static int
 is_listed(const char* str, size_t str_size, const struct str_list* list, int list_n)
 {
     int i;
