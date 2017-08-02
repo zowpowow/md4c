@@ -190,7 +190,8 @@ out:
 static const option cmdline_options[] = {
     { "output",                     'o', 'o', OPTION_ARG_REQUIRED },
     { "full-html",                  'f', 'f', OPTION_ARG_NONE },
-    { "stat",                       's', 's', OPTION_ARG_NONE },
+    { "safe",                       's', 's', OPTION_ARG_NONE },
+    { "stat",                        0,  't', OPTION_ARG_NONE },
     { "help",                       'h', 'h', OPTION_ARG_NONE },
     { "version",                    'v', 'v', OPTION_ARG_NONE },
     { "commonmark",                  0,  'c', OPTION_ARG_NONE },
@@ -221,7 +222,8 @@ usage(void)
         "General options:\n"
         "  -o  --output=FILE    Output file (default is standard output)\n"
         "  -f, --full-html      Generate full HTML document, including header\n"
-        "  -s, --stat           Measure time of input parsing\n"
+        "  -s, --safe           Enable safe mode\n"
+        "      --stat           Measure time of input parsing\n"
         "  -h, --help           Display this help and exit\n"
         "  -v, --version        Display version and exit\n"
         "\n"
@@ -282,7 +284,8 @@ cmdline_callback(int opt, char const* value, void* data)
 
         case 'o':   output_path = value; break;
         case 'f':   want_fullhtml = 1; break;
-        case 's':   want_stat = 1; break;
+        case 's':   renderer_flags |= MD_RENDER_FLAG_SAFEMODE; break;
+        case 't':   want_stat = 1; break;
         case 'h':   usage(); exit(0); break;
         case 'v':   version(); exit(0); break;
 
