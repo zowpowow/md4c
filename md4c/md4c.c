@@ -939,13 +939,21 @@ md_skip_unicode_whitespace(const CHAR* label, OFF off, SZ size)
  * When breaking document to blocks, we do not yet know line boundaries, but
  * in that case the whole tag has to live on a single line. We distinguish this
  * by n_lines == 0.
+ *
+ * Note the function may fail iff in the safe mode. In that case, *alloc_failed
+ * is set to TRUE.
  */
 static int
-md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_end, OFF* p_end)
+md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg,
+               OFF max_end, OFF* p_end, int* alloc_failed)
 {
     int attr_state;
     OFF off = beg;
     OFF line_end = (n_lines > 0) ? lines[0].end : ctx->size;
+    OFF tagname_beg, tagname_end;
+    OFF attr_beg = 0, attr_end = 0;
+    OFF value_beg = 0, value_end = 0;
+    int value_line_beg, value_line_end;
     int i = 0;
 
     MD_ASSERT(CH(beg) == _T('<'));
@@ -973,11 +981,21 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
     }
 
     /* Tag name */
+    tagname_beg = off;
     if(off >= line_end  ||  !ISALPHA(off))
         return FALSE;
     off++;
     while(off < line_end  &&  (ISALNUM(off)  ||  CH(off) == _T('-')))
         off++;
+    tagname_end = off;
+
+    /* Verify app. allows this tag. */
+    if(ctx->r.filter_html_tag != NULL) {
+        if(ctx->r.filter_html_tag(STR(tagname_beg), tagname_end - tagname_beg, ctx->userdata) != 0) {
+            MD_LOG("Tag disabled from filter_html_tag() callback.");
+            return FALSE;
+        }
+    }
 
     /* (Optional) attributes (if not closer), (optional) '/' (if not closer)
      * and final '>'. */
@@ -987,28 +1005,84 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
                 if(attr_state == 41 && (ISBLANK(off) || ISANYOF(off, _T("\"'=<>`")))) {
                     attr_state = 0;
                     off--;  /* Put the char back for re-inspection in the new state. */
+                    value_end = off;
+                    value_line_end = i;
                 } else if(attr_state == 42 && CH(off) == _T('\'')) {
                     attr_state = 0;
+                    value_end = off;
+                    value_line_end = i;
                 } else if(attr_state == 43 && CH(off) == _T('"')) {
                     attr_state = 0;
+                    value_end = off;
+                    value_line_end = i;
                 }
                 off++;
-            } else if(ISWHITESPACE(off)) {
-                if(attr_state == 0)
-                    attr_state = 1;
-                off++;
-            } else if(attr_state <= 2 && CH(off) == _T('>')) {
-                /* End. */
-                goto done;
-            } else if(attr_state <= 2 && CH(off) == _T('/') && off+1 < line_end && CH(off+1) == _T('>')) {
-                /* End with digraph '/>' */
-                off++;
-                goto done;
+            } else if(ISWHITESPACE(off)  ||
+                      (attr_state <= 2 && CH(off) == _T('>'))  ||
+                      (attr_state <= 2 && CH(off) == _T('/') && off+1 < line_end && CH(off+1) == _T('>'))) {
+
+                /* In the safe mode, filter attribute (and value). */
+                if(ctx->r.filter_html_attribute != NULL  &&  attr_beg < attr_end) {
+                    CHAR* value_str;
+                    SZ value_size;
+                    int value_needs_free = FALSE;
+                    int cancel;
+
+                    if(value_beg >= value_end) {
+                        value_str = NULL;
+                        value_size = 0;
+                    } else if(value_line_beg == value_line_end) {
+                        value_str = (CHAR*) STR(value_beg);
+                        value_size = value_end - value_beg;
+                    } else {
+                        if(md_merge_lines_alloc(ctx, value_beg, value_end,
+                                lines, n_lines, _T('\n'), &value_str, &value_size) != 0) {
+                            MD_ASSERT(alloc_failed != NULL);
+                            *alloc_failed = TRUE;
+                            return -1;
+                        }
+                        value_needs_free = TRUE;
+                    }
+
+                    cancel = ctx->r.filter_html_attribute(
+                                    STR(tagname_beg), tagname_end - tagname_beg,
+                                    STR(attr_beg), attr_end - attr_beg,
+                                    value_str, value_size,
+                                    ctx->userdata);
+
+                    if(value_needs_free)
+                        free(value_str);
+
+                    if(cancel) {
+                        MD_LOG("Tag disabled from filter_html_attribute() callback.");
+                        return FALSE;
+                    }
+
+                    attr_beg = 0;
+                    attr_end = 0;
+                    value_beg = 0;
+                    value_end = 0;
+                }
+
+                if(ISWHITESPACE(off)) {
+                    if(attr_state == 0)
+                        attr_state = 1;
+                    off++;
+                } else if(attr_state <= 2 && CH(off) == _T('>')) {
+                    /* End. */
+                    goto done;
+                } else if(attr_state <= 2 && CH(off) == _T('/') && off+1 < line_end && CH(off+1) == _T('>')) {
+                    /* End with digraph '/>' */
+                    off++;
+                    goto done;
+                }
             } else if((attr_state == 1 || attr_state == 2) && (ISALPHA(off) || CH(off) == _T('_') || CH(off) == _T(':'))) {
-                off++;
                 /* Attribute name */
+                attr_beg = off;
+                off++;
                 while(off < line_end && (ISALNUM(off) || ISANYOF(off, _T("_.:-"))))
                     off++;
+                attr_end = off;
                 attr_state = 2;
             } else if(attr_state == 2 && CH(off) == _T('=')) {
                 /* Attribute assignment sign */
@@ -1016,14 +1090,21 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
                 attr_state = 3;
             } else if(attr_state == 3) {
                 /* Expecting start of attribute value. */
-                if(CH(off) == _T('"'))
+                if(CH(off) == _T('"')) {
                     attr_state = 43;
-                else if(CH(off) == _T('\''))
+                    value_beg = off+1;
+                    value_line_beg = i;
+                } else if(CH(off) == _T('\'')) {
                     attr_state = 42;
-                else if(!ISANYOF(off, _T("\"'=<>`"))  &&  !ISNEWLINE(off))
+                    value_beg = off+1;
+                    value_line_beg = i;
+                } else if(!ISANYOF(off, _T("\"'=<>`"))  &&  !ISNEWLINE(off)) {
                     attr_state = 41;
-                else
+                    value_beg = off;
+                    value_line_beg = i;
+                } else {
                     return FALSE;
+                }
                 off++;
             } else {
                 /* Anything unexpected. */
@@ -1036,15 +1117,20 @@ md_is_html_tag(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_
         if(n_lines == 0)
             return FALSE;
 
+        if(attr_state == 0) {
+            attr_state = 1;
+        } else if(attr_state == 41) {
+            value_end = off;
+            value_line_end = i;
+            attr_state = 1;
+        }
+
         i++;
         if(i >= n_lines)
             return FALSE;
 
         off = lines[i].beg;
         line_end = lines[i].end;
-
-        if(attr_state == 0  ||  attr_state == 41)
-            attr_state = 1;
 
         if(off >= max_end)
             return FALSE;
@@ -1249,18 +1335,11 @@ done:
 static int
 md_is_html_any(MD_CTX* ctx, const MD_LINE* lines, int n_lines, OFF beg, OFF max_end, OFF* p_end)
 {
-    if(md_is_html_tag(ctx, lines, n_lines, beg, max_end, p_end) == TRUE)
-        return TRUE;
-    if(md_is_html_comment(ctx, lines, n_lines, beg, max_end, p_end) == TRUE)
-        return TRUE;
-    if(md_is_html_processing_instruction(ctx, lines, n_lines, beg, max_end, p_end) == TRUE)
-        return TRUE;
-    if(md_is_html_declaration(ctx, lines, n_lines, beg, max_end, p_end) == TRUE)
-        return TRUE;
-    if(md_is_html_cdata(ctx, lines, n_lines, beg, max_end, p_end) == TRUE)
-        return TRUE;
-
-    return FALSE;
+    return (md_is_html_tag(ctx, lines, n_lines, beg, max_end, p_end, NULL)  ||
+            md_is_html_comment(ctx, lines, n_lines, beg, max_end, p_end)  ||
+            md_is_html_processing_instruction(ctx, lines, n_lines, beg, max_end, p_end)  ||
+            md_is_html_declaration(ctx, lines, n_lines, beg, max_end, p_end)  ||
+            md_is_html_cdata(ctx, lines, n_lines, beg, max_end, p_end));
 }
 
 
@@ -3149,7 +3228,7 @@ md_is_autolink(MD_CTX* ctx, OFF beg, OFF end, int* p_missing_mailto)
     return FALSE;
 }
 
-static void
+static int
 md_analyze_lt_gt(MD_CTX* ctx, int mark_index, const MD_LINE* lines, int n_lines)
 {
     MD_MARK* mark = &ctx->marks[mark_index];
@@ -3158,7 +3237,7 @@ md_analyze_lt_gt(MD_CTX* ctx, int mark_index, const MD_LINE* lines, int n_lines)
     /* If it is an opener ('<'), remember it. */
     if(mark->flags & MD_MARK_POTENTIAL_OPENER) {
         md_mark_chain_append(ctx, &LOWERTHEN_OPENERS, mark_index);
-        return;
+        return 0;
     }
 
     /* Otherwise we are potential closer and we try to resolve with since all
@@ -3185,8 +3264,20 @@ md_analyze_lt_gt(MD_CTX* ctx, int mark_index, const MD_LINE* lines, int n_lines)
                 line_index++;
             }
 
-            is_raw_html = (md_is_html_any(ctx, lines + line_index,
-                    n_lines - line_index, opener->beg, mark->end, &detected_end));
+            if(ctx->r.filter_html_tag != NULL  ||  ctx->r.filter_html_attribute != NULL) {
+                int alloc_failed = FALSE;
+
+                /* Safe mode enabled: We recognize only HTML tags, and they are
+                 * subject of application filtering. */
+                is_raw_html = md_is_html_tag(ctx, lines + line_index,
+                        n_lines - line_index, opener->beg, mark->end, &detected_end, &alloc_failed);
+
+                if(alloc_failed)
+                    return -1;
+            } else {
+                is_raw_html = md_is_html_any(ctx, lines + line_index,
+                        n_lines - line_index, opener->beg, mark->end, &detected_end);
+            }
         }
 
         /* Check whether the range forms a valid raw HTML. */
@@ -3212,11 +3303,13 @@ md_analyze_lt_gt(MD_CTX* ctx, int mark_index, const MD_LINE* lines, int n_lines)
             }
 
             /* And we are done. */
-            return;
+            return 0;
         }
 
         opener_index = opener->next;
     }
+
+    return 0;
 }
 
 static void
@@ -3269,8 +3362,8 @@ md_analyze_bracket(MD_CTX* ctx, int mark_index)
 }
 
 /* Forward declaration. */
-static void md_analyze_link_contents(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
-                                     int mark_beg, int mark_end);
+static int md_analyze_link_contents(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
+                                    int mark_beg, int mark_end);
 
 static int
 md_resolve_links(MD_CTX* ctx, const MD_LINE* lines, int n_lines)
@@ -3280,6 +3373,7 @@ md_resolve_links(MD_CTX* ctx, const MD_LINE* lines, int n_lines)
     OFF last_link_end = 0;
     OFF last_img_beg = 0;
     OFF last_img_end = 0;
+    int ret = 0;
 
     while(opener_index >= 0) {
         MD_MARK* opener = &ctx->marks[opener_index];
@@ -3404,13 +3498,14 @@ md_resolve_links(MD_CTX* ctx, const MD_LINE* lines, int n_lines)
                 last_img_end = closer->end;
             }
 
-            md_analyze_link_contents(ctx, lines, n_lines, opener_index+1, closer_index);
+            MD_CHECK(md_analyze_link_contents(ctx, lines, n_lines, opener_index+1, closer_index));
         }
 
         opener_index = next_index;
     }
 
-    return 0;
+abort:
+    return ret;
 }
 
 /* Analyze whether the mark '&' starts a HTML entity.
@@ -3684,11 +3779,12 @@ md_analyze_permissive_email_autolink(MD_CTX* ctx, int mark_index)
     md_resolve_range(ctx, NULL, mark_index, closer_index);
 }
 
-static inline void
+static inline int
 md_analyze_marks(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
                  int mark_beg, int mark_end, const CHAR* mark_chars)
 {
     int i = mark_beg;
+    int ret = 0;
 
     while(i < mark_end) {
         MD_MARK* mark = &ctx->marks[i];
@@ -3714,7 +3810,7 @@ md_analyze_marks(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
         switch(mark->ch) {
             case '`':   md_analyze_backtick(ctx, i); break;
             case '<':   /* Pass through. */
-            case '>':   md_analyze_lt_gt(ctx, i, lines, n_lines); break;
+            case '>':   MD_CHECK(md_analyze_lt_gt(ctx, i, lines, n_lines)); break;
             case '[':   /* Pass through. */
             case '!':   /* Pass through. */
             case ']':   md_analyze_bracket(ctx, i); break;
@@ -3730,6 +3826,9 @@ md_analyze_marks(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
 
         i++;
     }
+
+abort:
+    return ret;
 }
 
 /* Analyze marks (build ctx->marks). */
@@ -3747,13 +3846,13 @@ md_analyze_inlines(MD_CTX* ctx, const MD_LINE* lines, int n_lines, int table_mod
 
     /* We analyze marks in few groups to handle their precedence. */
     /* (1) Entities; code spans; autolinks; raw HTML. */
-    md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("&`<>"));
+    MD_CHECK(md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("&`<>")));
     BACKTICK_OPENERS.head = -1;
     BACKTICK_OPENERS.tail = -1;
     LOWERTHEN_OPENERS.head = -1;
     LOWERTHEN_OPENERS.tail = -1;
     /* (2) Links. */
-    md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("[]!"));
+    MD_CHECK(md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("[]!")));
     MD_CHECK(md_resolve_links(ctx, lines, n_lines));
     BRACKET_OPENERS.head = -1;
     BRACKET_OPENERS.tail = -1;
@@ -3767,7 +3866,7 @@ md_analyze_inlines(MD_CTX* ctx, const MD_LINE* lines, int n_lines, int table_mod
         TABLECELLBOUNDARIES.head = -1;
         TABLECELLBOUNDARIES.tail = -1;
         ctx->n_table_cell_boundaries = 0;
-        md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("|"));
+        MD_CHECK(md_analyze_marks(ctx, lines, n_lines, 0, ctx->n_marks, _T("|")));
     } else {
         /* (3b) Emphasis and strong emphasis; permissive autolinks. */
         md_analyze_link_contents(ctx, lines, n_lines, 0, ctx->n_marks);
@@ -3777,17 +3876,21 @@ abort:
     return ret;
 }
 
-static void
+static int
 md_analyze_link_contents(MD_CTX* ctx, const MD_LINE* lines, int n_lines,
                          int mark_beg, int mark_end)
 {
-    md_analyze_marks(ctx, lines, n_lines, mark_beg, mark_end, _T("*_~@:."));
+    int ret;
+
+    ret = md_analyze_marks(ctx, lines, n_lines, mark_beg, mark_end, _T("*_~@:."));
     ASTERISK_OPENERS.head = -1;
     ASTERISK_OPENERS.tail = -1;
     UNDERSCORE_OPENERS.head = -1;
     UNDERSCORE_OPENERS.tail = -1;
     TILDE_OPENERS.head = -1;
     TILDE_OPENERS.tail = -1;
+
+    return ret;
 }
 
 static int
@@ -4964,6 +5067,13 @@ md_is_html_block_start_condition(MD_CTX* ctx, OFF beg)
     OFF off = beg + 1;
     int i;
 
+    if(ctx->r.filter_html_tag != NULL  ||  ctx->r.filter_html_attribute != NULL) {
+        /* Safe mode enabled: In this mode, only blocks composed of nothing
+         * but valid tags are recognized as HTML blocks. This analysis is
+         * however performed after the complete block is known. */
+        return FALSE;
+    }
+
     /* Check for type 1: <script, <pre, or <style */
     for(i = 0; t1[i].name != NULL; i++) {
         if(off + t1[i].len < ctx->size) {
@@ -5024,7 +5134,7 @@ md_is_html_block_start_condition(MD_CTX* ctx, OFF beg)
     if(off + 1 < ctx->size) {
         OFF end;
 
-        if(md_is_html_tag(ctx, NULL, 0, beg, ctx->size, &end)) {
+        if(md_is_html_tag(ctx, NULL, 0, beg, ctx->size, &end, NULL)) {
             /* Only optional whitespace and new line may follow. */
             while(end < ctx->size  &&  ISWHITESPACE(end))
                 end++;

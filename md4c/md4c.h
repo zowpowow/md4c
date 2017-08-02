@@ -314,6 +314,29 @@ typedef struct MD_RENDERER {
      */
     void (*debug_log)(const char* /*msg*/, void* /*userdata*/);
 
+    /* Security-related callbacks (aka colloquially as "safe mode").
+     *
+     * These allow an application to filter out potentially unsafe things.
+     *
+     * When any of these is used (not NULL), raw HTML is parsed in a safe mode
+     * and raw HTML is recognized only if it forms complete valid HTML/XML
+     * tags instead of more lax Commonmark rules.
+     *
+     * The tag name is then provided the callback 'filter_html_tag()' (if
+     * provided) which can refuse it bu returning non-zero.
+     *
+     * If the tag itself is allowed, its attributes are passed (one by one),
+     * to 'filter_html_attribute()' (if provided).
+     *
+     * Refusing the tag or any of its attributes means it shall be seen as a
+     * normal text (and as such will be subject of HTML escaping).
+     */
+    int (*filter_html_tag)(const MD_CHAR* /*tag*/, MD_SIZE /*size*/, void* /*userdata*/);
+    int (*filter_html_attribute)(const MD_CHAR* /*tag*/, MD_SIZE /*tag_size*/,
+                                 const MD_CHAR* /*attr*/, MD_SIZE /*attr_size*/,
+                                 const MD_CHAR* /*value*/, MD_SIZE /*value_size*/,
+                                 void* /*userdata*/);
+
     /* Dialect options. Bitmask of MD_FLAG_xxxx values.
      */
     unsigned flags;
