@@ -38,12 +38,8 @@
 
 /* Magic to support UTF-16. */
 #if defined MD4C_USE_UTF16
-    #ifdef _WIN32
-		#include <wchar.h>
+        #include <wchar.h>
         typedef wchar_t       MD_CHAR;
-    #else
-        #error MD4C_USE_UTF16 is only supported on Windows.
-    #endif
 #else
     typedef char            MD_CHAR;
 #endif
@@ -279,7 +275,7 @@ typedef struct MD_SPAN_IMG_DETAIL {
 
 #define MD_FLAG_PERMISSIVEAUTOLINKS         (MD_FLAG_PERMISSIVEEMAILAUTOLINKS | MD_FLAG_PERMISSIVEURLAUTOLINKS | MD_FLAG_PERMISSIVEWWWAUTOLINKS)
 #define MD_FLAG_NOHTML                      (MD_FLAG_NOHTMLBLOCKS | MD_FLAG_NOHTMLSPANS)
-#define MD_FLAG_REDDITSLASHDETECTION             0x8000  /* Enable Reddit autolinks */
+#define MD_FLAG_REDDITAUTOLINKS            0x8000  /* Enable Reddit autolinks */
 #define MD_FLAG_REDDIT_SLASHES_AS_LINKS        0x4000 //Instead of making Reddit links into special spans, make them into web links
 
 

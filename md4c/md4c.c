@@ -46,7 +46,6 @@
     #undef _T
 #endif
 #if defined MD4C_USE_UTF16
-	#include <Windows.h>
     #define _T(x)           L##x
 #else
     #define _T(x)           x
@@ -704,7 +703,7 @@ struct MD_UNICODE_FOLD_INFO_tag {
     #define IS_UTF16_SURROGATE_HI(word)     (((WORD)(word) & 0xfc00) == 0xd800)
     #define IS_UTF16_SURROGATE_LO(word)     (((WORD)(word) & 0xfc00) == 0xdc00)
     #define UTF16_DECODE_SURROGATE(hi, lo)  (0x10000 + ((((unsigned)(hi) & 0x3ff) << 10) | (((unsigned)(lo) & 0x3ff) << 0)))
-
+    typedef unsigned short WORD;
     static int
     md_decode_utf16le__(const CHAR* str, SZ str_size, SZ* p_size)
     {
