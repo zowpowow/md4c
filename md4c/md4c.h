@@ -132,7 +132,7 @@ typedef enum MD_SPANTYPE {
      * Note: Recognized only when MD_FLAG_STRIKETHROUGH is enabled.
      */
     MD_SPAN_DEL,
-	MD_REDDIT_SLASH_LINK
+    MD_REDDIT_SLASH_LINK
 } MD_SPANTYPE;
 
 /* Text is the actual textual contents of span. */
@@ -175,7 +175,7 @@ typedef enum MD_TEXTTYPE {
 } MD_TEXTTYPE;
 typedef enum MD_REDDIT_SLASH_TYPE
 {
-	MD_REDDIT_USER, MD_REDDIT_SUBREDDIT
+    MD_REDDIT_USER, MD_REDDIT_SUBREDDIT
 } MD_REDDIT_SLASH_TYPE;
 /* Alignment enumeration. */
 typedef enum MD_ALIGN {
@@ -250,10 +250,9 @@ typedef struct MD_SPAN_A_DETAIL {
 } MD_SPAN_A_DETAIL;
 typedef struct MD_REDDIT_SLASH_DETAIL
 {
-	MD_REDDIT_SLASH_TYPE type; //whether it's a user or subreddit
-	/*whether the name of the user or subreddit starts two or three characters away from the beginning. To get a pointer to the name text + offset*/
-	unsigned char size; //length of the whole thing, including the /r/ part.
-	MD_CHAR * name;
+    MD_REDDIT_SLASH_TYPE type; //whether it's a user or subreddit
+    unsigned char size; 
+    MD_CHAR * name;
 }MD_REDDIT_SLASH_DETAIL;
 /* Detailed info for MD_SPAN_IMG. */
 typedef struct MD_SPAN_IMG_DETAIL {
@@ -283,6 +282,7 @@ typedef struct MD_SPAN_IMG_DETAIL {
 #define MD_FLAG_REDDITSLASHDETECTION             0x8000  /* Enable Reddit autolinks */
 #define MD_FLAG_REDDIT_SLASHES_AS_LINKS        0x4000 //Instead of making Reddit links into special spans, make them into web links
 
+
 /* Convenient sets of flags corresponding to well-known Markdown dialects.
  * Note we may only support subset of features of the referred dialect.
  * The constant just enables those extensions which bring us as close as
@@ -290,7 +290,7 @@ typedef struct MD_SPAN_IMG_DETAIL {
  */
 #define MD_DIALECT_COMMONMARK               0
 #define MD_DIALECT_GITHUB                   (MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_TABLES | MD_FLAG_STRIKETHROUGH)
-#define MD_DIALECT_REDDITPOST               (MD_FLAG_PERMISSIVEATXHEADERS | MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_NOHTML | MD_FLAG_REDDITSLASHDETECTION | MD_FLAG_STRIKETHROUGH)
+#define MD_DIALECT_REDDIT               (MD_FLAG_PERMISSIVEATXHEADERS | MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_NOHTML | MD_FLAG_REDDITAUTOLINKS | MD_FLAG_STRIKETHROUGH)
 
 /* Renderer structure.
  */
